@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Admin · Radical Books</title>
+<link rel="stylesheet" href="/style.css">
+<style>
+  main{max-width:1000px;padding-top:80px}
+  .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:14px;margin-bottom:30px}
+  .stat{background:var(--bg2);border:1px solid var(--line);border-radius:14px;padding:18px}
+  .stat .n{font-size:30px;font-weight:800}
+  .stat .l{font-family:var(--mono);font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.5px;margin-top:4px}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th,td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--line)}
+  th{font-family:var(--mono);font-size:11px;color:var(--dim);text-transform:uppercase}
+  .pill{font-family:var(--mono);font-size:11px;padding:3px 8px;border-radius:6px;background:var(--bg3)}
+  .pill.open{color:var(--gold)} .pill.done,.pill.paid{color:#5bd67f}
+  .card2{background:var(--bg2);border:1px solid var(--line);border-radius:14px;padding:20px;margin-bottom:22px}
+</style>
+</head>
+<body>
+<header class="nav"><a class="brand" href="/"><span class="dot"></span>Radical<b>Books</b> · Admin</a></header>
+<main id="main"><div class="spin"></div></main>
+<script type="module">
+const api = async (p, o) => { const r = await fetch(p, { headers: { 'Content-Type': 'application/json' }, ...o }); const j = await r.json().catch(() => ({})); if (!r.ok) throw Object.assign(new Error(j.error), { status: r.status }); return j; };
+const esc = s => String(s ?? '').replace(/[<>&]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c]));
+const main = document.getElementById('main');
+(async () => {
+  const { admin } = await api('/api/admin/whoami');
+  if (!admin) { main.innerHTML = '<div class="empty"><h2>Not authorised</h2><p>Sign in with an admin account.</p><a class="btn primary" href="/" style="margin-top:16px">Home</a></div>'; return; }
+  const [ov, jobs, fb, reqs, users] = await Promise.all([
+    api('/api/admin/overview'), api('/api/admin/jobs'), api('/api/admin/feedback'), api('/api/admin/requests'), api('/api/admin/users'),
+  ]);
+  main.innerHTML = `
+    <div class="stats">
+      ${[['Books', ov.books], ['Audiobooks', ov.audiobooks], ['Ebooks', ov.ebooks], ['Users', ov.users], ['Paid', ov.paid], ['Queue', ov.queued], ['Feedback', ov.openFeedback]]
+        .map(([l, n]) => `<div class="stat"><div class="n">${n}</div><div class="l">${l}</div></div>`).join('')}
+    </div>
+    <div class="card2"><h2 style="margin-bottom:12px">Seed catalog</h2>
+      <div style="display:flex;gap:10px;align-items:end;flex-wrap:wrap">
+        <div class="field" style="margin:0"><label>Audiobooks</label><input id="sa" value="20" style="width:90px"></div>
+        <div class="field" style="margin:0"><label>Ebook pages</label><input id="se" value="2" style="width:90px"></div>
+        <button class="btn primary" id="seedBtn">Seed now</button>
+        <span class="mono muted" id="seedMsg" style="font-size:12px"></span>
+      </div></div>
+    <div class="card2"><h2 style="margin-bottom:12px">Ingest jobs</h2>
+      <table><thead><tr><th>Kind</th><th>Status</th><th>Progress</th><th>Message / error</th></tr></thead><tbody>
+      ${jobs.jobs.slice(0, 20).map(j => `<tr><td>${j.kind}</td><td><span class="pill ${j.status}">${j.status}</span></td><td>${j.progress || 0}%</td><td class="muted">${esc(j.error || j.message || '')}</td></tr>`).join('')}
+      </tbody></table></div>
+    <div class="card2"><h2 style="margin-bottom:12px">Feedback</h2>
+      <table><tbody>${fb.feedback.slice(0, 20).map(f => `<tr><td><span class="pill">${f.type}</span></td><td>${esc(f.username || '')}</td><td>${esc(f.message)}</td><td><span class="pill ${f.status}">${f.status}</span></td></tr>`).join('') || '<tr><td class="muted">No feedback yet</td></tr>'}</tbody></table></div>
+    <div class="card2"><h2 style="margin-bottom:12px">Requests</h2>
+      <table><tbody>${reqs.requests.slice(0, 20).map(r => `<tr><td>${esc(r.query)}</td><td class="muted">${r.media_type || ''}</td></tr>`).join('') || '<tr><td class="muted">No requests</td></tr>'}</tbody></table></div>
+    <div class="card2"><h2 style="margin-bottom:12px">Users (${users.users.length})</h2>
+      <table><thead><tr><th>Username</th><th>Email</th><th>Access</th><th></th></tr></thead><tbody>
+      ${users.users.slice(0, 50).map(u => `<tr><td>${esc(u.username)}</td><td class="muted">${esc(u.email || '')}</td><td><span class="pill ${u.paid ? 'paid' : ''}">${u.paid ? (u.access_type || 'paid') : 'free'}</span></td>
+        <td><button class="pill" data-grant="${u.id}">Comp 30d</button> <button class="pill" data-revoke="${u.id}">Revoke</button></td></tr>`).join('')}
+      </tbody></table></div>`;
+  document.getElementById('seedBtn').onclick = async () => {
+    const msg = document.getElementById('seedMsg'); msg.textContent = 'Queued…';
+    const r = await api('/api/admin/seed', { method: 'POST', body: JSON.stringify({ audio: +document.getElementById('sa').value, ebooks: +document.getElementById('se').value }) });
+    msg.textContent = r.note || 'Seeding started in background.';
+  };
+  document.querySelectorAll('[data-grant]').forEach(b => b.onclick = async () => { await api(`/api/admin/users/${b.dataset.grant}/grant`, { method: 'POST', body: JSON.stringify({ days: 30 }) }); location.reload(); });
+  document.querySelectorAll('[data-revoke]').forEach(b => b.onclick = async () => { await api(`/api/admin/users/${b.dataset.revoke}/revoke`, { method: 'POST' }); location.reload(); });
+})().catch(e => { main.innerHTML = `<div class="empty"><h2>Error</h2><p>${esc(e.message)}</p></div>`; });
+</script>
+</body>
+</html>

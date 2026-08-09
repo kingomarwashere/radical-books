@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Radical Books — free audiobooks &amp; ebooks</title>
+<meta name="description" content="Stream public-domain audiobooks and read ebooks, beautifully. A Radical Party project.">
+<meta name="theme-color" content="#0B0B09">
+<link rel="manifest" href="/manifest.json">
+<link rel="icon" href="/favicon.svg">
+<link rel="apple-touch-icon" href="/icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<header class="nav">
+  <a class="brand" href="/"><span class="dot"></span>Radical<b>Books</b></a>
+  <nav class="tabs" id="tabs">
+    <a class="tab" data-route="/" href="/">Home</a>
+    <a class="tab" data-route="/audiobooks" href="/audiobooks">Audiobooks</a>
+    <a class="tab" data-route="/ebooks" href="/ebooks">Ebooks</a>
+    <a class="tab" data-route="/library" href="/library">My Library</a>
+  </nav>
+  <form class="search" id="searchForm">
+    <svg viewBox="0 0 24 24" fill="none" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4"/></svg>
+    <input id="searchInput" placeholder="Search books, authors…" autocomplete="off">
+  </form>
+  <div id="navRight"></div>
+</header>
+
+<main id="app"><div class="spin"></div></main>
+
+<div class="player" id="player">
+  <img class="pcover" id="pCover" src="" alt="">
+  <div class="pinfo"><div class="pt" id="pTitle"></div><div class="pa" id="pAuthor"></div></div>
+  <div class="controls">
+    <button id="pPrev" title="Previous chapter"><svg class="i" viewBox="0 0 24 24"><path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/></svg></button>
+    <button class="pp" id="pPlay"></button>
+    <button id="pNext" title="Next chapter"><svg class="i" viewBox="0 0 24 24"><path d="M16 6h2v12h-2zM6 18l8.5-6L6 6z"/></svg></button>
+  </div>
+  <div class="bar">
+    <span class="time" id="pCur">0:00</span>
+    <div class="seek" id="pSeek"><i id="pSeekFill"></i></div>
+    <span class="time" id="pDur">0:00</span>
+  </div>
+  <button class="rate" id="pRate">1×</button>
+</div>
+
+<div class="modal-bg" id="modalBg"><div class="modal" id="modal"></div></div>
+<div class="toast" id="toast"></div>
+
+<audio id="audio" preload="metadata"></audio>
+<script src="/app.js?v=1" type="module"></script>
+</body>
+</html>

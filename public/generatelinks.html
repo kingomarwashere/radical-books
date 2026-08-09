@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Generate Links · Radical Books</title>
+<link rel="stylesheet" href="/style.css">
+<style>
+  main{max-width:760px;padding-top:80px}
+  table{width:100%;border-collapse:collapse;font-size:13px;margin-top:20px}
+  th,td{text-align:left;padding:9px 10px;border-bottom:1px solid var(--line)}
+  th{font-family:var(--mono);font-size:11px;color:var(--dim);text-transform:uppercase}
+  .link{font-family:var(--mono);font-size:12px;color:var(--red);word-break:break-all;cursor:pointer}
+  .row2{display:flex;gap:10px;flex-wrap:wrap;align-items:end}
+</style>
+</head>
+<body>
+<header class="nav"><a class="brand" href="/"><span class="dot"></span>Radical<b>Books</b> · Links</a></header>
+<main>
+  <div class="field"><label>Gen key (x-gen-key)</label><input id="gk" type="password" placeholder="GEN_KEY"></div>
+  <div class="card2" style="background:var(--bg2);border:1px solid var(--line);border-radius:14px;padding:20px">
+    <div class="row2">
+      <div class="field" style="margin:0"><label>Free days</label><input id="fd" value="14" style="width:90px"></div>
+      <div class="field" style="margin:0"><label>Then A$/mo (cents)</label><input id="ma" value="300" style="width:120px"></div>
+      <div class="field" style="margin:0"><label>Max uses</label><input id="mu" placeholder="∞" style="width:90px"></div>
+      <div class="field" style="margin:0"><label>Code (optional)</label><input id="cc" style="width:120px"></div>
+      <button class="btn primary" id="mk">Create link</button>
+    </div>
+    <div class="err" id="err"></div>
+  </div>
+  <table id="tbl"><thead><tr><th>Code</th><th>Offer</th><th>Uses</th><th>Link</th><th></th></tr></thead><tbody></tbody></table>
+</main>
+<script type="module">
+const gk = () => document.getElementById('gk').value.trim();
+const api = async (p, o = {}) => { const r = await fetch(p, { headers: { 'Content-Type': 'application/json', 'x-gen-key': gk() }, ...o }); const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || r.status); return j; };
+const esc = s => String(s ?? '').replace(/[<>&]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c]));
+document.getElementById('gk').value = localStorage.rbGenKey || '';
+document.getElementById('gk').onchange = e => localStorage.rbGenKey = e.target.value;
+async function load() { try { render(await api('/api/generatelinks/offers')); } catch {} }
+function render(offers) {
+  document.querySelector('#tbl tbody').innerHTML = offers.map(o => `<tr>
+    <td class="mono">${esc(o.code)}</td><td>${o.freeDays}d → A$${(o.monthlyAmount / 100).toFixed(2)}/mo</td>
+    <td>${o.uses}${o.maxUses ? '/' + o.maxUses : ''}</td>
+    <td><span class="link" data-copy="${esc(o.link)}">${esc(o.link)}</span></td>
+    <td><button class="pill" data-del="${esc(o.code)}">✕</button></td></tr>`).join('');
+  document.querySelectorAll('[data-copy]').forEach(x => x.onclick = () => { navigator.clipboard.writeText(x.dataset.copy); x.textContent = 'copied!'; setTimeout(() => x.textContent = x.dataset.copy, 1000); });
+  document.querySelectorAll('[data-del]').forEach(x => x.onclick = async () => { await api('/api/generatelinks/offers/' + x.dataset.del, { method: 'DELETE' }); load(); });
+}
+document.getElementById('mk').onclick = async () => {
+  document.getElementById('err').textContent = '';
+  try {
+    await api('/api/generatelinks/offers', { method: 'POST', body: JSON.stringify({ freeDays: +document.getElementById('fd').value, monthlyAmount: +document.getElementById('ma').value, maxUses: document.getElementById('mu').value || null, code: document.getElementById('cc').value || null }) });
+    load();
+  } catch (e) { document.getElementById('err').textContent = e.message; }
+};
+load();
+</script>
+</body>
+</html>

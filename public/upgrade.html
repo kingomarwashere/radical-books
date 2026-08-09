@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Membership · Radical Books</title>
+<link rel="stylesheet" href="/style.css">
+<style>
+  main{max-width:860px;padding-top:70px}
+  .hero{text-align:center;margin-bottom:44px}
+  .hero h1{font-size:40px;font-weight:800;letter-spacing:-1.5px;margin-bottom:12px}
+  .hero h1 b{color:var(--red)}
+  .hero p{color:var(--dim);font-size:17px;max-width:520px;margin:0 auto}
+  .plans{display:grid;grid-template-columns:1fr 1fr;gap:18px;max-width:660px;margin:0 auto}
+  .plan{background:var(--bg2);border:1px solid var(--line);border-radius:18px;padding:28px;position:relative}
+  .plan.best{border-color:var(--red);box-shadow:0 0 40px rgba(255,45,85,.15)}
+  .plan .tag{position:absolute;top:-11px;left:50%;transform:translateX(-50%);background:var(--red);color:#fff;font-family:var(--mono);font-size:11px;font-weight:600;padding:4px 12px;border-radius:99px}
+  .plan h3{font-size:16px;font-family:var(--mono);color:var(--dim);text-transform:uppercase;letter-spacing:1px;margin-bottom:10px}
+  .plan .price{font-size:40px;font-weight:800;letter-spacing:-1px}
+  .plan .price span{font-size:15px;color:var(--dim);font-weight:500}
+  .plan .save{color:var(--gold);font-family:var(--mono);font-size:13px;margin-top:4px}
+  .plan ul{list-style:none;margin:20px 0;font-size:14px;color:var(--dim)}
+  .plan li{padding:7px 0;padding-left:26px;position:relative}
+  .plan li::before{content:'✓';position:absolute;left:0;color:var(--red);font-weight:800}
+  .plan button{width:100%;margin-top:8px}
+  .backlink{display:block;text-align:center;margin-top:30px;color:var(--dim);font-family:var(--mono);font-size:13px}
+  #offerBanner{max-width:660px;margin:0 auto 22px;background:var(--bg3);border:1px solid var(--gold);border-radius:14px;padding:16px;text-align:center;color:var(--gold);font-family:var(--mono);font-size:14px;display:none}
+  @media(max-width:640px){.plans{grid-template-columns:1fr}.hero h1{font-size:30px}}
+</style>
+</head>
+<body>
+<header class="nav"><a class="brand" href="/"><span class="dot"></span>Radical<b>Books</b></a></header>
+<main>
+  <div class="hero"><h1>Read &amp; listen <b>without limits</b></h1><p>Every audiobook and ebook in the library. Cancel anytime. Your first 72 hours are always free.</p></div>
+  <div id="offerBanner"></div>
+  <div class="plans">
+    <div class="plan"><h3>Monthly</h3><div class="price">A$5<span>/mo</span></div>
+      <ul><li>Unlimited audiobooks</li><li>Unlimited ebooks + reader</li><li>Sync across devices</li><li>Offline downloads</li></ul>
+      <button class="btn ghost" data-plan="monthly">Choose monthly</button></div>
+    <div class="plan best"><div class="tag">BEST VALUE</div><h3>Annual</h3><div class="price">A$40<span>/yr</span></div><div class="save">Save 33% — under A$3.34/mo</div>
+      <ul><li>Everything in monthly</li><li>2 months free</li><li>Support the Radical Party</li></ul>
+      <button class="btn primary" data-plan="annual">Choose annual</button></div>
+  </div>
+  <a class="backlink" href="/">← Back to the library</a>
+</main>
+<script type="module">
+const api = async (p, o) => { const r = await fetch(p, { headers: { 'Content-Type': 'application/json' }, ...o }); const j = await r.json().catch(() => ({})); if (!r.ok) throw Object.assign(new Error(j.error), { status: r.status }); return j; };
+const offer = new URLSearchParams(location.search).get('offer');
+(async () => {
+  const me = await api('/api/me').catch(() => ({ user: null }));
+  if (!me.user) { location.href = '/?needlogin=1'; return; }
+  if (offer) {
+    const o = await api(`/api/offer/${offer}`).catch(() => ({ valid: false }));
+    if (o.valid) { const b = document.getElementById('offerBanner'); b.style.display = 'block'; b.textContent = `🎁 Offer applied: ${o.freeDays} days free, then A$${(o.monthlyAmount / 100).toFixed(2)}/mo`; }
+  }
+})();
+document.querySelectorAll('[data-plan]').forEach(btn => btn.onclick = async () => {
+  btn.textContent = 'Redirecting…'; btn.disabled = true;
+  try {
+    if (offer) { await api('/api/billing/redeem', { method: 'POST', body: JSON.stringify({ code: offer }) }).catch(() => {}); }
+    const plan = offer ? 'offer' : btn.dataset.plan;
+    const { url } = await api('/api/billing/checkout', { method: 'POST', body: JSON.stringify({ plan }) });
+    location.href = url;
+  } catch (e) { btn.textContent = e.message || 'Error'; btn.disabled = false; }
+});
+</script>
+</body>
+</html>
