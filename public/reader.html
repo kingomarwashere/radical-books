@@ -55,6 +55,7 @@ async function boot() {
   try {
     const test = await fetch(`/api/book/${bookId}/ebook/url`);
     if (test.status === 402) return location.href = '/upgrade';
+    if (test.status === 401) return location.href = `/?auth=login`;
   } catch {}
   book = ePub(`/api/book/${bookId}/ebook/file?format=epub`);
   rendition = book.renderTo('viewer', { width: '100%', height: '100%', flow: 'paginated', spread: 'auto' });
