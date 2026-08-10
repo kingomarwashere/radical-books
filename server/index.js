@@ -12,6 +12,7 @@ import { getPaidInfo, billingRoutes, handleWebhook } from './billing.js';
 import { offerRoutes } from './offers.js';
 import { AVATAR_PRESETS, resolveAvatar, isValidAvatar } from './avatars.js';
 import { discoverSearch } from './sources/googlebooks.js';
+import { openLibraryTrending } from './curated.js';
 import { seoRoutes } from './seo.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -107,18 +108,40 @@ app.get('/api/search', (req, res) => {
   res.json({ books: C.listBooks({ q, limit: 40 }) });
 });
 
-app.get('/api/home', (req, res) => {
-  const uid = req.session?.user?.id;
-  const sections = [
-    { title: 'Audiobooks', books: C.listBooks({ mediaType: 'audio', limit: 18 }) },
-    { title: 'Ebooks', books: C.listBooks({ mediaType: 'ebook', limit: 18 }) },
-    { title: 'Recently added', books: C.listBooks({ limit: 18, sort: 'added' }) },
-  ];
-  for (const s of C.listSubjects(6)) {
-    const books = C.listBooks({ subject: s.name, limit: 12 });
-    if (books.length >= 4) sections.push({ title: s.name, subject: s.name, books });
+// Cached "trending now" — Open Library trending intersected with books we have.
+let _trending = { at: 0, books: [] };
+async function trendingBooks() {
+  if (Date.now() - _trending.at < 60 * 60 * 1000) return _trending.books;
+  const list = await openLibraryTrending('weekly').catch(() => []);
+  const seen = new Set(), have = [];
+  for (const t of list) {
+    const row = C.findBookByTitleAuthor(t.title, t.author);
+    if (row && !seen.has(row.id)) { seen.add(row.id); have.push(C.toBookClient(row)); }
+    if (have.length >= 18) break;
   }
-  res.json({ continue: uid ? C.getContinue(uid) : [], sections: sections.filter(s => s.books.length) });
+  _trending = { at: Date.now(), books: have };
+  return have;
+}
+
+const cleanGenre = (s) => s.replace(/^Category:\s*/i, '').trim();
+
+app.get('/api/home', async (req, res) => {
+  const uid = req.session?.user?.id;
+  const sections = [];
+  // Lead with popularity so recognizable books surface first (not obscure archive rows).
+  sections.push({ title: 'Popular right now', books: C.listBooks({ sort: 'popular', limit: 18 }) });
+  const trending = await trendingBooks().catch(() => []);
+  if (trending.length >= 4) sections.push({ title: 'Trending this week', books: trending });
+  sections.push({ title: 'Popular audiobooks', books: C.listBooks({ mediaType: 'audio', sort: 'popular', limit: 18 }) });
+  sections.push({ title: 'Popular ebooks', books: C.listBooks({ mediaType: 'ebook', sort: 'popular', limit: 18 }) });
+  sections.push({ title: 'Just added', books: C.listBooks({ sort: 'added', limit: 18 }) });
+  for (const s of C.listSubjects(20)) {
+    const label = cleanGenre(s.name);
+    if (/^(fiction|general|literature)$/i.test(label)) continue; // too generic
+    const books = C.listBooks({ subject: s.name, sort: 'popular', limit: 14 });
+    if (books.length >= 5) sections.push({ title: label, subject: s.name, books });
+  }
+  res.json({ continue: uid ? C.getContinue(uid) : [], sections: sections.filter(s => s.books.length >= 4).slice(0, 10) });
 });
 
 // Book detail (chapters/editions include `url`, stripped for unpaid by middleware).

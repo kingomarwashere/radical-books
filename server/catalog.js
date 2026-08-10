@@ -51,6 +51,8 @@ db.exec(`
     has_ebook    INTEGER DEFAULT 0,
     audio_runtime INTEGER,           -- total seconds (audiobook)
     reader       TEXT,               -- narrator (audiobook)
+    popularity   INTEGER DEFAULT 0,  -- Gutenberg download count / OL ratings — for ranking
+    featured     INTEGER DEFAULT 0,  -- hand-curated "popular" pick
     added_at     INTEGER,
     UNIQUE(source, source_id)
   );
@@ -200,6 +202,13 @@ db.exec(`
   );
 `);
 
+// Migrations for existing DBs (columns added after first deploy).
+for (const stmt of [
+  `ALTER TABLE books ADD COLUMN popularity INTEGER DEFAULT 0`,
+  `ALTER TABLE books ADD COLUMN featured INTEGER DEFAULT 0`,
+]) { try { db.exec(stmt); } catch {} }
+db.exec(`CREATE INDEX IF NOT EXISTS idx_books_popularity ON books(popularity DESC)`);
+
 const now = () => Date.now();
 const slugify = (s) => (s || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80);
 export { slugify };
@@ -225,9 +234,9 @@ export { cryptoId };
 // ── Books ────────────────────────────────────────────────────────────────────
 const _insBook = db.prepare(`INSERT INTO books
   (id, title, slug, author_id, author_name, description, cover_url, year, language, subjects,
-   source, source_id, has_audio, has_ebook, audio_runtime, reader, added_at)
+   source, source_id, has_audio, has_ebook, audio_runtime, reader, popularity, featured, added_at)
   VALUES (@id, @title, @slug, @author_id, @author_name, @description, @cover_url, @year, @language, @subjects,
-   @source, @source_id, @has_audio, @has_ebook, @audio_runtime, @reader, @added_at)`);
+   @source, @source_id, @has_audio, @has_ebook, @audio_runtime, @reader, @popularity, @featured, @added_at)`);
 
 export const getBookBySource = (source, sourceId) =>
   db.prepare(`SELECT * FROM books WHERE source = ? AND source_id = ?`).get(source, sourceId);
@@ -275,10 +284,20 @@ export function createBook(b) {
     has_ebook: b.hasEbook ? 1 : 0,
     audio_runtime: b.audioRuntime || null,
     reader: b.reader || null,
+    popularity: b.popularity || 0,
+    featured: b.featured ? 1 : 0,
     added_at: now(),
   };
   _insBook.run(row);
   return row;
+}
+
+// Bump a book's popularity / featured flag (idempotent, keeps the max popularity).
+export function setPopularity(bookId, { popularity, featured } = {}) {
+  db.prepare(`UPDATE books SET
+      popularity = MAX(popularity, COALESCE(?, popularity)),
+      featured   = COALESCE(?, featured)
+    WHERE id = ?`).run(popularity ?? null, featured == null ? null : (featured ? 1 : 0), bookId);
 }
 
 export function setBookFlags(bookId, { hasAudio, hasEbook, audioRuntime, reader } = {}) {
@@ -307,6 +326,7 @@ export function listBooks({ mediaType = 'any', subject = null, q = null, limit =
   if (q) { where.push(`(title LIKE ? OR author_name LIKE ?)`); args.push(`%${q}%`, `%${q}%`); }
   const order = sort === 'title' ? 'title COLLATE NOCASE ASC'
     : sort === 'year' ? 'year DESC'
+    : sort === 'popular' ? 'featured DESC, popularity DESC, added_at DESC'
     : 'added_at DESC';
   const rows = db.prepare(
     `SELECT * FROM books WHERE ${where.join(' AND ')} ORDER BY ${order} LIMIT ? OFFSET ?`
@@ -340,6 +360,7 @@ export function toBookClient(b) {
     year: b.year, language: b.language, subjects,
     source: b.source, hasAudio: !!b.has_audio, hasEbook: !!b.has_ebook,
     audioRuntime: b.audio_runtime, reader: b.reader,
+    popularity: b.popularity || 0, featured: !!b.featured,
   };
 }
 

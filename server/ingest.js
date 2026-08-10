@@ -5,7 +5,7 @@
 // R2 upload secret (local dev) we hotlink the original LibriVox/Gutenberg URLs,
 // which are freely accessible — so the catalog works with zero storage setup.
 import {
-  createBook, getBook, getBookBySource, findBookByTitleAuthor, setBookFlags,
+  createBook, getBook, getBookBySource, findBookByTitleAuthor, setBookFlags, setPopularity,
   addChapter, addEdition, clearChapters, getChapters, getEditions, upsertAuthor, slugify,
 } from './catalog.js';
 import { uploadUrlToR2, uploadStreamToR2, getStreamUrl } from './r2.js';
@@ -90,6 +90,7 @@ export async function ingestEbook(descriptor, { onProgress } = {}) {
 
   const book = resolveBook(d, { hasEbook: true });
   await enrichBook(book, d);
+  if (d.downloadCount) setPopularity(book.id, { popularity: d.downloadCount });
   if (getEditions(book.id).some(e => e.format === 'epub')) { setBookFlags(book.id, { hasEbook: true }); return book; }
 
   let url = d.epubUrl, r2Key = null, size = null;
