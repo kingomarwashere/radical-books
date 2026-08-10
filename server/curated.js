@@ -53,19 +53,39 @@ export const CURATED = [
   { gid: 100,  title: 'The Complete Works of William Shakespeare', author: 'William Shakespeare' },
 ];
 
-// Popular modern audiobooks to try via the torrent path (best-effort — depends on
-// tracker availability). These give the catalog genuinely recent titles.
-export const MODERN_AUDIO = [
-  { title: 'Project Hail Mary', author: 'Andy Weir' },
+// Popular MODERN / recent books — acquired from Internet Archive (both ebook +
+// audiobook when available). These give the catalog genuinely recent bestsellers.
+export const MODERN = [
   { title: 'Atomic Habits', author: 'James Clear' },
   { title: 'The Midnight Library', author: 'Matt Haig' },
   { title: 'Where the Crawdads Sing', author: 'Delia Owens' },
   { title: 'The Silent Patient', author: 'Alex Michaelides' },
   { title: 'Educated', author: 'Tara Westover' },
-  { title: 'Sapiens', author: 'Yuval Noah Harari' },
+  { title: 'Sapiens: A Brief History of Humankind', author: 'Yuval Noah Harari' },
   { title: 'The Seven Husbands of Evelyn Hugo', author: 'Taylor Jenkins Reid' },
   { title: 'Dune', author: 'Frank Herbert' },
   { title: 'The Song of Achilles', author: 'Madeline Miller' },
+  { title: 'Circe', author: 'Madeline Miller' },
+  { title: 'Project Hail Mary', author: 'Andy Weir' },
+  { title: 'The Martian', author: 'Andy Weir' },
+  { title: 'It Ends with Us', author: 'Colleen Hoover' },
+  { title: 'Verity', author: 'Colleen Hoover' },
+  { title: 'The Body Keeps the Score', author: 'Bessel van der Kolk' },
+  { title: 'Thinking, Fast and Slow', author: 'Daniel Kahneman' },
+  { title: 'The Subtle Art of Not Giving a F*ck', author: 'Mark Manson' },
+  { title: 'Becoming', author: 'Michelle Obama' },
+  { title: 'The Alchemist', author: 'Paulo Coelho' },
+  { title: 'The Handmaid’s Tale', author: 'Margaret Atwood' },
+  { title: '1984', author: 'George Orwell' },
+  { title: 'The Kite Runner', author: 'Khaled Hosseini' },
+  { title: 'Normal People', author: 'Sally Rooney' },
+  { title: 'The Hunger Games', author: 'Suzanne Collins' },
+  { title: 'Gone Girl', author: 'Gillian Flynn' },
+  { title: 'Lessons in Chemistry', author: 'Bonnie Garmus' },
+  { title: 'Tomorrow, and Tomorrow, and Tomorrow', author: 'Gabrielle Zevin' },
+  { title: 'The Fault in Our Stars', author: 'John Green' },
+  { title: 'A Little Life', author: 'Hanya Yanagihara' },
+  { title: 'The Great Alone', author: 'Kristin Hannah' },
 ];
 
 // Live "trending" from Open Library (genuinely current popularity). Returns

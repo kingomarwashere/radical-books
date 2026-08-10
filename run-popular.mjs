@@ -7,14 +7,14 @@
 // 3. Best-effort: fetch popular MODERN audiobooks via torrents (genuinely recent).
 import './server/net.js';
 import 'dotenv/config';
-import { CURATED, MODERN_AUDIO } from './server/curated.js';
+import { CURATED } from './server/curated.js';
 import { ingestEbook, acquireAudiobook } from './server/ingest.js';
 import { setPopularity, findBookByTitleAuthor } from './server/catalog.js';
 
 const audioCount = parseInt(process.argv[2] || '16', 10);
 const BASE = 5_000_000;
 
-let eb = 0, au = 0, mod = 0;
+let eb = 0, au = 0;
 
 // 1 + 2: curated famous public-domain books
 for (let i = 0; i < CURATED.length; i++) {
@@ -41,15 +41,5 @@ for (let i = 0; i < CURATED.length; i++) {
   }
 }
 
-// 3: modern popular audiobooks via torrents (best-effort — depends on trackers)
-for (const m of MODERN_AUDIO) {
-  try {
-    const b = await acquireAudiobook({ plainTitle: m.title, title: m.title, authorName: m.author, source: 'manual' });
-    setPopularity(b.id, { popularity: BASE + 100000, featured: true }); // rank modern above classics
-    mod++;
-    console.log(`[modern] ✓ ${m.title}`);
-  } catch (e) { console.warn(`[modern] ✗ ${m.title}: ${e.message}`); }
-}
-
-console.log(`\nDone: ${eb} curated ebooks, ${au} curated audiobooks, ${mod} modern audiobooks featured.`);
+console.log(`\nDone: ${eb} curated ebooks, ${au} curated audiobooks featured. (Run run-modern.mjs for recent bestsellers.)`);
 process.exit(0);

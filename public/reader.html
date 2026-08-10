@@ -52,12 +52,16 @@ async function boot() {
   try { detail = await api(`/api/book/${bookId}`); } catch { return location.href = '/'; }
   document.getElementById('bkTitle').textContent = detail.book.title;
   saved = detail.progress?.ebook || null;
-  // Gate check + file: the proxy endpoint 402s if unpaid.
+  // Gate check + format: the proxy endpoint 402s if unpaid.
+  let format = 'epub';
   try {
     const test = await fetch(`/api/book/${bookId}/ebook/url`);
     if (test.status === 402) return location.href = '/upgrade';
     if (test.status === 401) return location.href = `/?auth=login`;
+    if (test.ok) { const jd = await test.json().catch(() => ({})); format = jd.format || 'epub'; }
   } catch {}
+  // PDF editions (some Internet Archive books): use the browser's native viewer.
+  if (format === 'pdf') return openPdf();
   if (typeof ePub === 'undefined') return fail('Reader failed to load. Please refresh.');
   // Fetch the epub as an ArrayBuffer and hand THAT to epub.js. Passing a URL makes
   // epub.js sniff the extension — our URL ends in "/ebook/file" (no .epub), so it
@@ -125,6 +129,15 @@ document.getElementById('rprog').onclick = (e) => {
   const cfi = book?.locations?.cfiFromPercentage((e.clientX - r.left) / r.width);
   if (cfi) rendition.display(cfi);
 };
+// PDF fallback — render in the browser's native PDF viewer (no pdf.js needed).
+function openPdf() {
+  const v = document.getElementById('viewer');
+  v.style.top = 'calc(52px + var(--safe-top))'; v.style.bottom = '0';
+  v.innerHTML = `<iframe title="PDF" src="/api/book/${bookId}/ebook/file?format=pdf" style="width:100%;height:100%;border:0;background:#fff"></iframe>`;
+  document.getElementById('load').style.display = 'none';
+  for (const id of ['prev', 'next', 'btnPlus', 'btnMinus', 'btnTheme']) { const el = document.getElementById(id); if (el) el.style.display = 'none'; }
+  const bot = document.querySelector('.rbot'); if (bot) bot.style.display = 'none';
+}
 let failed = false;
 function fail(msg) {
   if (failed) return; failed = true;

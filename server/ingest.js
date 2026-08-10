@@ -15,6 +15,7 @@ import { enrich, coverByTitle } from './sources/openlibrary.js';
 import { searchTorrentLeech } from './sources/torrentleech.js';
 import { findAudiobookBay } from './sources/audiobookbay.js';
 import { findLibgenEbook } from './sources/libgen.js';
+import { searchArchiveAudio, searchArchiveEbook } from './sources/archive.js';
 import { addTorrent, addMagnet, waitForDownload, listAudioFiles, streamFile } from './seedbox.js';
 import path from 'node:path';
 
@@ -123,6 +124,24 @@ function chapterTitleFromFile(name, i) {
   return name.replace(/\.[^.]+$/, '').replace(/^\d+[\s._-]*/, '').replace(/[_.]+/g, ' ').trim() || `Chapter ${i + 1}`;
 }
 
+// Attach audiobook chapters from a list of direct URLs (Internet Archive), mirroring
+// each to R2 (or hotlinking when MIRROR is off). Progress spans 20→98%.
+async function attachAudioFromUrls(bookId, chapters, onProgress) {
+  clearChapters(bookId);
+  for (let i = 0; i < chapters.length; i++) {
+    const ch = chapters[i];
+    let url = ch.url, r2Key = null, size = null;
+    if (MIRROR) {
+      const ext = extOf(ch.url) || '.mp3';
+      const key = `${KEY_PREFIX}/audio/${bookId}/${String(i).padStart(4, '0')}${ext}`;
+      const r = await uploadUrlToR2(ch.url, key, ext);
+      r2Key = key; url = getStreamUrl(key); size = r.size;
+    }
+    addChapter({ bookId, idx: i, title: ch.title || `Part ${i + 1}`, duration: ch.duration, r2Key, url, size });
+    onProgress?.(20 + Math.floor((i + 1) / chapters.length * 78), `chapter ${i + 1}/${chapters.length}`);
+  }
+}
+
 // Book row from Discover metadata (Google Books or Open Library) — created before
 // we know which media source will supply the actual file.
 function bookFromMeta(meta) {
@@ -144,9 +163,21 @@ export async function acquireAudiobook(meta, { onProgress } = {}) {
   const lv = (await searchLibriVox(title).catch(() => [])).find(r => titleMatches(r.title, title));
   if (lv) { onProgress?.(8, 'found on LibriVox'); return ingestAudiobook({ sourceId: lv.sourceId }, { onProgress }); }
 
-  // 2) Torrents → seedbox → R2
-  if (!TORRENTS_ENABLED()) throw new Error('Not on LibriVox and torrents are not configured');
-  onProgress?.(10, 'searching torrents');
+  // 2) Internet Archive (modern audiobooks, direct MP3 — no torrent/seedbox needed)
+  onProgress?.(10, 'searching Internet Archive');
+  const ia = await searchArchiveAudio(title, author).catch(() => null);
+  if (ia?.chapters?.length) {
+    const book = bookFromMeta(meta);
+    await enrichBook(book, { title, authorName: author, coverUrl: meta.cover, description: meta.description, subjects: meta.categories });
+    onProgress?.(15, `found on Internet Archive (${Math.round(ia.runtime / 60)}m)`);
+    await attachAudioFromUrls(book.id, ia.chapters, onProgress);
+    setBookFlags(book.id, { hasAudio: true, audioRuntime: ia.runtime });
+    return getBook(book.id);
+  }
+
+  // 3) Torrents → seedbox → R2
+  if (!TORRENTS_ENABLED()) throw new Error('Not on LibriVox/Internet Archive and torrents are not configured');
+  onProgress?.(18, 'searching torrents');
   let tor = await searchTorrentLeech(title, author, 'audio').catch(() => null);
   if (!tor) tor = await findAudiobookBay(title, author).catch(() => null);
   if (!tor) throw new Error('No audiobook torrent found');
@@ -180,20 +211,23 @@ export async function acquireEbook(meta, { onProgress } = {}) {
   const gb = (await searchGutenberg(title).catch(() => [])).find(r => titleMatches(r.title, title));
   if (gb) { onProgress?.(10, 'found on Gutenberg'); return ingestEbook({ sourceId: gb.sourceId, ...gb }, { onProgress }); }
 
-  // 2) libgen direct download
-  onProgress?.(12, 'searching libgen');
-  const lg = await findLibgenEbook(title, author).catch(() => null);
-  if (!lg) throw new Error('Not on Gutenberg and no libgen match');
+  // 2) Internet Archive (modern ebooks — epub preferred, pdf fallback), then 3) libgen.
+  onProgress?.(8, 'searching Internet Archive');
+  let found = await searchArchiveEbook(title, author).catch(() => null);
+  if (!found) { onProgress?.(12, 'searching libgen'); found = await findLibgenEbook(title, author).catch(() => null); }
+  if (!found) throw new Error('Not on Gutenberg / Internet Archive / libgen');
+
   const book = bookFromMeta(meta);
   await enrichBook(book, { title, authorName: author, coverUrl: meta.cover, description: meta.description, subjects: meta.categories });
-  let url = lg.url, r2Key = null, size = null;
+  const fmt = found.format || 'epub';
+  let url = found.url, r2Key = null, size = null;
   if (MIRROR) {
-    const key = `${KEY_PREFIX}/ebook/${book.id}.${lg.format || 'epub'}`;
-    onProgress?.(40, 'downloading ebook');
-    const r = await uploadUrlToR2(lg.url, key, `.${lg.format || 'epub'}`);
+    const key = `${KEY_PREFIX}/ebook/${book.id}.${fmt}`;
+    onProgress?.(40, `downloading ${fmt}`);
+    const r = await uploadUrlToR2(found.url, key, `.${fmt}`);
     r2Key = key; url = getStreamUrl(key); size = r.size;
   }
-  addEdition({ bookId: book.id, format: lg.format || 'epub', r2Key, url, size, source: 'libgen' });
+  addEdition({ bookId: book.id, format: fmt, r2Key, url, size, source: found.source || 'archive' });
   setBookFlags(book.id, { hasEbook: true });
   onProgress?.(100, 'done');
   return getBook(book.id);
