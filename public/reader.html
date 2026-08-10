@@ -59,11 +59,23 @@ async function boot() {
     if (test.status === 401) return location.href = `/?auth=login`;
   } catch {}
   if (typeof ePub === 'undefined') return fail('Reader failed to load. Please refresh.');
-  book = ePub(`/api/book/${bookId}/ebook/file?format=epub`);
+  // Fetch the epub as an ArrayBuffer and hand THAT to epub.js. Passing a URL makes
+  // epub.js sniff the extension — our URL ends in "/ebook/file" (no .epub), so it
+  // wrongly treats the book as an unpacked directory and hangs. An ArrayBuffer is
+  // always opened as a zip archive (typeof !== 'string' → archived mode).
+  let buf;
+  try {
+    const r = await fetch(`/api/book/${bookId}/ebook/file?format=epub`);
+    if (!r.ok) return fail('Could not load this book (' + r.status + '). It may still be processing.');
+    buf = await r.arrayBuffer();
+    if (!buf.byteLength) return fail('This book file is empty. It may still be processing — try again shortly.');
+  } catch { return fail('Network error loading this book. Please retry.'); }
+  try { book = ePub(buf); } catch (e) { return fail('Could not open this book (' + (e.message || 'error') + ').'); }
   rendition = book.renderTo('viewer', { width: '100%', height: '100%', flow: 'paginated', spread: 'auto' });
   applyTheme();
   // Never hang forever — if the book can't be parsed, surface an error.
   const guard = setTimeout(() => fail('This book couldn’t be opened. It may still be processing — try again shortly.'), 25000);
+  try { await book.ready; } catch { clearTimeout(guard); return fail('This book file appears to be corrupted or unsupported.'); }
   await rendition.display(saved?.locator || undefined);
   clearTimeout(guard);
   document.getElementById('load').style.display = 'none';
