@@ -8,10 +8,18 @@ import {
   createBook, getBook, getBookBySource, findBookByTitleAuthor, setBookFlags,
   addChapter, addEdition, clearChapters, getChapters, getEditions, upsertAuthor, slugify,
 } from './catalog.js';
-import { uploadUrlToR2, getStreamUrl } from './r2.js';
-import { getLibriVoxBook } from './sources/librivox.js';
-import { getGutenbergBook } from './sources/gutenberg.js';
+import { uploadUrlToR2, uploadStreamToR2, getStreamUrl } from './r2.js';
+import { getLibriVoxBook, searchLibriVox } from './sources/librivox.js';
+import { getGutenbergBook, searchGutenberg } from './sources/gutenberg.js';
 import { enrich, coverByTitle } from './sources/openlibrary.js';
+import { searchTorrentLeech } from './sources/torrentleech.js';
+import { findAudiobookBay } from './sources/audiobookbay.js';
+import { findLibgenEbook } from './sources/libgen.js';
+import { addTorrent, addMagnet, waitForDownload, listAudioFiles, streamFile } from './seedbox.js';
+import path from 'node:path';
+
+const SEEDBOX_SAVE_PATH = process.env.SEEDBOX_SAVE_PATH || '/home/seedit4me/torrents/qbittorrent';
+const TORRENTS_ENABLED = () => !!process.env.SEEDBOX_USER; // seedbox creds present
 
 const MIRROR = process.env.MIRROR_TO_R2 === '1' || (!!process.env.R2_UPLOAD_SECRET && process.env.MIRROR_TO_R2 !== '0');
 const KEY_PREFIX = process.env.R2_KEY_PREFIX || 'books';
@@ -97,6 +105,99 @@ export async function ingestEbook(descriptor, { onProgress } = {}) {
   return getBook(book.id);
 }
 
+// ── Acquire by title/author (Discover → best available source) ───────────────
+// Given rich metadata (from Google Books), find the actual media and ingest it:
+// audio → LibriVox (free) then torrents (TorrentLeech/AudioBookBay → seedbox);
+// ebook → Gutenberg (free) then libgen (direct download). `meta` carries the
+// Google Books cover/description so even torrent-sourced books look good.
+const norm = (s) => (s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+function titleMatches(a, b) {
+  const x = norm(a), y = norm(b);
+  if (!x || !y) return false;
+  const short = x.length < y.length ? x : y, long = x.length < y.length ? y : x;
+  return long.includes(short.split(' ').slice(0, 4).join(' '));
+}
+
+function chapterTitleFromFile(name, i) {
+  return name.replace(/\.[^.]+$/, '').replace(/^\d+[\s._-]*/, '').replace(/[_.]+/g, ' ').trim() || `Chapter ${i + 1}`;
+}
+
+// Book row from Discover metadata (Google Books or Open Library) — created before
+// we know which media source will supply the actual file.
+function bookFromMeta(meta) {
+  const src = meta.source || 'discover';
+  const existing = (meta.gbid && getBookBySource(src, meta.gbid)) || findBookByTitleAuthor(meta.plainTitle || meta.title, meta.authorName);
+  if (existing) return existing;
+  const author = upsertAuthor({ name: meta.authorName });
+  return createBook({
+    title: meta.plainTitle || meta.title, authorId: author?.id, authorName: meta.authorName,
+    description: meta.description, coverUrl: meta.cover, year: meta.year,
+    language: meta.language || 'en', subjects: meta.categories, source: src, sourceId: meta.gbid || null,
+  });
+}
+
+export async function acquireAudiobook(meta, { onProgress } = {}) {
+  const title = meta.plainTitle || meta.title, author = meta.authorName;
+  // 1) LibriVox (free, public domain)
+  onProgress?.(3, 'searching LibriVox');
+  const lv = (await searchLibriVox(title).catch(() => [])).find(r => titleMatches(r.title, title));
+  if (lv) { onProgress?.(8, 'found on LibriVox'); return ingestAudiobook({ sourceId: lv.sourceId }, { onProgress }); }
+
+  // 2) Torrents → seedbox → R2
+  if (!TORRENTS_ENABLED()) throw new Error('Not on LibriVox and torrents are not configured');
+  onProgress?.(10, 'searching torrents');
+  let tor = await searchTorrentLeech(title, author, 'audio').catch(() => null);
+  if (!tor) tor = await findAudiobookBay(title, author).catch(() => null);
+  if (!tor) throw new Error('No audiobook torrent found');
+
+  const book = bookFromMeta(meta);
+  await enrichBook(book, { title, authorName: author, coverUrl: meta.cover, description: meta.description, subjects: meta.categories });
+  const savePath = `${SEEDBOX_SAVE_PATH}/${book.id}`;
+  onProgress?.(15, `downloading: ${tor.title}`);
+  const hash = tor.torrentBuf ? await addTorrent(tor.torrentBuf, savePath) : await addMagnet(tor.magnet, savePath);
+  const info = await waitForDownload(hash, (p, st) => onProgress?.(15 + Math.floor(p * 0.6), `torrent ${p}% (${st})`));
+  const remote = info?.content_path || info?.save_path || savePath;
+  const files = await listAudioFiles(remote);
+  if (!files.length) throw new Error('No audio files in torrent');
+  clearChapters(book.id);
+  for (let i = 0; i < files.length; i++) {
+    const f = files[i], ext = path.extname(f.name) || '.mp3';
+    const key = `${KEY_PREFIX}/audio/${book.id}/${String(i).padStart(4, '0')}${ext}`;
+    const readable = await streamFile(f.path);
+    await uploadStreamToR2(readable, f.size, key, ext);
+    addChapter({ bookId: book.id, idx: i, title: chapterTitleFromFile(f.name, i), r2Key: key, url: getStreamUrl(key), size: f.size });
+    onProgress?.(75 + Math.floor((i + 1) / files.length * 24), `uploading ${i + 1}/${files.length}`);
+  }
+  setBookFlags(book.id, { hasAudio: true });
+  return getBook(book.id);
+}
+
+export async function acquireEbook(meta, { onProgress } = {}) {
+  const title = meta.plainTitle || meta.title, author = meta.authorName;
+  // 1) Project Gutenberg (free, public domain)
+  onProgress?.(4, 'searching Gutenberg');
+  const gb = (await searchGutenberg(title).catch(() => [])).find(r => titleMatches(r.title, title));
+  if (gb) { onProgress?.(10, 'found on Gutenberg'); return ingestEbook({ sourceId: gb.sourceId, ...gb }, { onProgress }); }
+
+  // 2) libgen direct download
+  onProgress?.(12, 'searching libgen');
+  const lg = await findLibgenEbook(title, author).catch(() => null);
+  if (!lg) throw new Error('Not on Gutenberg and no libgen match');
+  const book = bookFromMeta(meta);
+  await enrichBook(book, { title, authorName: author, coverUrl: meta.cover, description: meta.description, subjects: meta.categories });
+  let url = lg.url, r2Key = null, size = null;
+  if (MIRROR) {
+    const key = `${KEY_PREFIX}/ebook/${book.id}.${lg.format || 'epub'}`;
+    onProgress?.(40, 'downloading ebook');
+    const r = await uploadUrlToR2(lg.url, key, `.${lg.format || 'epub'}`);
+    r2Key = key; url = getStreamUrl(key); size = r.size;
+  }
+  addEdition({ bookId: book.id, format: lg.format || 'epub', r2Key, url, size, source: 'libgen' });
+  setBookFlags(book.id, { hasEbook: true });
+  onProgress?.(100, 'done');
+  return getBook(book.id);
+}
+
 // Bulk-seed the catalog from LibriVox + Gutenberg (used by the admin Seed button).
 export async function seedCatalog({ audio = 20, ebooks = 2 } = {}, { onProgress } = {}) {
   const { browseLibriVox } = await import('./sources/librivox.js');
@@ -126,6 +227,8 @@ export async function runJob(job, { updateJob } = {}) {
   }
   const book = job.kind === 'audiobook' ? await ingestAudiobook(payload, { onProgress })
     : job.kind === 'ebook' ? await ingestEbook(payload, { onProgress })
+    : job.kind === 'acquire-audio' ? await acquireAudiobook(payload, { onProgress })
+    : job.kind === 'acquire-ebook' ? await acquireEbook(payload, { onProgress })
     : (() => { throw new Error(`Unknown job kind: ${job.kind}`); })();
   updateJob?.(job.id, { status: 'done', progress: 100, bookId: book.id, message: 'complete' });
   return book;

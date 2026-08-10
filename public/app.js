@@ -221,42 +221,52 @@ function saveProg(finished = false) {
 // ── Discover + ingest ────────────────────────────────────────────────────────
 function openDiscover(q = '') {
   if (!ME.user) return openAuth();
-  openModal(`<button class="close">&times;</button><h3>Discover free books</h3><p class="sub">Search LibriVox audiobooks &amp; Project Gutenberg ebooks. Add any to the library.</p>
-    <div class="field"><input id="dq" placeholder="Title or author…" value="${esc(q)}"></div>
+  openModal(`<button class="close">&times;</button><h3>Discover</h3><p class="sub">Search millions of books. Add any as an audiobook or ebook — free public-domain copies when available, otherwise sourced for you.</p>
+    <div class="field"><input id="dq" placeholder="Search title, author, ISBN…" value="${esc(q)}"></div>
     <div id="dresults"></div>`);
   const run = async () => {
     const query = $('#dq').value.trim(); if (!query) return;
     $('#dresults').innerHTML = '<div class="spin"></div>';
-    const { audiobooks, ebooks } = await api(`/api/discover?q=${encodeURIComponent(query)}`);
+    let results = [];
+    try { ({ results } = await api(`/api/discover?q=${encodeURIComponent(query)}`)); }
+    catch { $('#dresults').innerHTML = '<p class="muted mono" style="font-size:13px">Search failed. Try again.</p>'; return; }
     const box = $('#dresults'); box.innerHTML = '';
-    const section = (label, items, media) => {
-      if (!items.length) return;
-      box.appendChild(el(`<div class="mono muted" style="font-size:11px;margin:14px 0 6px;text-transform:uppercase">${label}</div>`));
-      items.forEach(it => {
-        const r = el(`<div class="dres"><div class="di"><div class="dt">${esc(it.title)}</div><div class="da">${esc(it.authorName || '')}${it.runtime ? ' · ' + runtime(it.runtime) : ''}</div></div><button>Add</button></div>`);
-        $('button', r).onclick = async (ev) => {
-          ev.target.textContent = '…'; ev.target.disabled = true;
-          const { jobId } = await api('/api/ingest', { method: 'POST', body: JSON.stringify({ source: it.source, sourceId: it.sourceId, mediaType: media }) });
-          pollJob(jobId, ev.target);
-        };
-        box.appendChild(r);
+    if (!results.length) { box.innerHTML = '<p class="muted mono" style="font-size:13px">No results. Try another title.</p>'; return; }
+    results.forEach(it => {
+      const stars = it.rating ? '★'.repeat(Math.round(it.rating)) : '';
+      const card = el(`<div class="dbook">
+        <img class="dbc" loading="lazy" src="${it.cover || ''}" onerror="this.style.visibility='hidden'">
+        <div class="dbi">
+          <div class="dt">${esc(it.title)}</div>
+          <div class="da">${esc(it.authorName || '')}${it.year ? ' · ' + it.year : ''}${stars ? ' · <span style="color:var(--gold)">' + stars + '</span>' : ''}</div>
+          <div class="dd">${esc((it.description || '').slice(0, 140))}${(it.description || '').length > 140 ? '…' : ''}</div>
+          <div class="dbtns">
+            <button data-m="audio">🎧 Audiobook</button>
+            <button data-m="ebook">📖 Ebook</button>
+          </div>
+        </div></div>`);
+      card.querySelectorAll('[data-m]').forEach(btn => btn.onclick = async () => {
+        const orig = btn.textContent; btn.textContent = 'Finding…'; btn.disabled = true;
+        try {
+          const { jobId } = await api('/api/acquire', { method: 'POST', body: JSON.stringify({ ...it, mediaType: btn.dataset.m }) });
+          pollJob(jobId, btn, orig);
+        } catch (e) { btn.textContent = e.message || 'Error'; btn.disabled = false; }
       });
-    };
-    section('Audiobooks (LibriVox)', audiobooks, 'audio');
-    section('Ebooks (Project Gutenberg)', ebooks, 'ebook');
-    if (!audiobooks.length && !ebooks.length) box.innerHTML = '<p class="muted mono" style="font-size:13px">No free results. Try another title.</p>';
+      box.appendChild(card);
+    });
   };
   $('#dq').onkeydown = (e) => e.key === 'Enter' && run();
   if (q) run();
 }
-async function pollJob(jobId, btn) {
+async function pollJob(jobId, btn, origLabel) {
+  let tries = 0;
   const tick = async () => {
     const j = await api(`/api/job/${jobId}`).catch(() => null);
-    if (!j) return;
-    if (j.status === 'done') { btn.textContent = '✓ Added'; btn.classList.add('added'); toast('Added to library'); return; }
-    if (j.status === 'error') { btn.textContent = 'Failed'; return; }
-    btn.textContent = (j.progress || 0) + '%';
-    setTimeout(tick, 1500);
+    if (!j) { if (tries++ < 400) setTimeout(tick, 2000); return; }
+    if (j.status === 'done') { btn.textContent = '✓ Added'; btn.classList.add('added'); toast('Added to your library'); return; }
+    if (j.status === 'error') { btn.textContent = '✕ Not found'; btn.title = j.error || ''; setTimeout(() => { if (origLabel) { btn.textContent = origLabel; btn.disabled = false; } }, 2500); return; }
+    btn.textContent = j.message ? j.message.slice(0, 22) : ((j.progress || 0) + '%');
+    if (tries++ < 400) setTimeout(tick, 2000);
   };
   tick();
 }

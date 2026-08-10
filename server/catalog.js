@@ -236,16 +236,25 @@ export const getBookBySlug = (slug) => db.prepare(`SELECT * FROM books WHERE slu
 
 // Soft-merge across sources: match an existing work by normalized title + author
 // so a LibriVox audiobook and a Gutenberg ebook of the same book share one row.
+// Leading articles ("the/a/an") and subtitles are stripped so "The Adventures of
+// Sherlock Holmes" and "Adventures of Sherlock Holmes" collapse together.
+const stripArticle = (s) => (s || '').replace(/^(the|a|an)\s+/i, '').split(/[:—–]/)[0];
 export function findBookByTitleAuthor(title, author) {
-  const t = slugify(title);
-  if (!t) return null;
-  const a = author ? slugify(author).slice(0, 20) : null;
-  const rows = db.prepare(`SELECT * FROM books WHERE slug = ? OR slug LIKE ?`).all(t, `${t}%`);
-  for (const r of rows) {
-    if (!a) return r;
-    if (r.author_name && slugify(r.author_name).slice(0, 20) === a) return r;
-  }
-  return null;
+  const t = slugify(title), tc = slugify(stripArticle(title));
+  if (!t && !tc) return null;
+  const rows = db.prepare(`SELECT * FROM books WHERE slug IN (?, ?) OR slug LIKE ? OR slug LIKE ?`)
+    .all(t, tc, `${t}%`, `${tc}%`);
+  // Keep only strong title matches (article-stripped slug equals the query's).
+  const candidates = rows.filter(r => slugify(stripArticle(r.title)) === tc || r.slug === t);
+  if (!candidates.length) return null;
+  const a = author && author !== 'Unknown' ? slugify(author) : null;
+  if (!a) return candidates[0];
+  // Fuzzy author match handles "Arthur Conan Doyle" vs "Sir Arthur Conan Doyle".
+  const authorHit = candidates.find(r => {
+    const ra = slugify(r.author_name || '');
+    return ra && (ra.includes(a) || a.includes(ra));
+  });
+  return authorHit || null; // author known but no author match → treat as different work
 }
 
 export function createBook(b) {

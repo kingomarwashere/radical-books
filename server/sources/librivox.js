@@ -46,19 +46,32 @@ function normalize(b) {
   };
 }
 
-// Search audiobooks by title (LibriVox has no free-text endpoint; `title` matches
-// on a substring). Returns lightweight results (no chapters) for a picker UI.
+// Search audiobooks by title. LibriVox's `title` param is a PREFIX match anchored
+// at the start of the stored title, so a leading "The"/subtitle breaks it. We try
+// progressively looser variants (strip leading article, drop subtitle, shorten)
+// and return the first non-empty batch.
 export async function searchLibriVox(query, limit = 20) {
-  const url = `${BASE}?${new URLSearchParams({ title: `^${query}`, format: 'json', limit: String(limit), extended: '0' })}`;
-  const data = await j(url).catch(() => null);
-  const books = data?.books || [];
-  return books.map(b => ({
-    source: 'librivox', sourceId: String(b.id),
-    title: (b.title || '').trim(),
-    authorName: (b.authors || []).map(a => [a.first_name, a.last_name].filter(Boolean).join(' ')).filter(Boolean)[0] || 'Various',
-    runtime: parseInt(b.totaltimesecs) || null,
-    numSections: parseInt(b.num_sections) || null,
-  }));
+  const variants = [];
+  const base = (query || '').trim();
+  const noArticle = base.replace(/^(the|a|an)\s+/i, '');
+  const noSub = noArticle.split(/[:—–-]/)[0].trim();
+  const short = noSub.split(/\s+/).slice(0, 5).join(' ');
+  for (const v of [base, noArticle, noSub, short]) if (v && !variants.includes(v)) variants.push(v);
+
+  for (const v of variants) {
+    const url = `${BASE}?${new URLSearchParams({ title: v, format: 'json', limit: String(limit), extended: '0' })}`;
+    const data = await j(url).catch(() => null);
+    const books = data?.books || [];
+    if (!books.length) continue;
+    return books.map(b => ({
+      source: 'librivox', sourceId: String(b.id),
+      title: (b.title || '').trim(),
+      authorName: (b.authors || []).map(a => [a.first_name, a.last_name].filter(Boolean).join(' ')).filter(Boolean)[0] || 'Various',
+      runtime: parseInt(b.totaltimesecs) || null,
+      numSections: parseInt(b.num_sections) || null,
+    }));
+  }
+  return [];
 }
 
 // Fetch one full audiobook (with chapters) by its LibriVox id.

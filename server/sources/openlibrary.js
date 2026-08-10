@@ -35,3 +35,40 @@ export async function enrich(title, author) {
 export function coverByTitle(title) {
   return `https://covers.openlibrary.org/b/title/${encodeURIComponent(title)}-L.jpg`;
 }
+
+// Rich, keyless Discover search (the open "TMDB for books"). Normalized to the
+// same shape Google Books returns so the UI + acquire flow are engine-agnostic.
+export async function searchOpenLibrary(query, { limit = 24 } = {}) {
+  const params = new URLSearchParams({
+    q: query, limit: String(limit),
+    fields: 'key,title,author_name,first_publish_year,cover_i,subject,ratings_average,ratings_count,language, isbn,ia,ebook_access',
+  });
+  const data = await j(`https://openlibrary.org/search.json?${params}`).catch(() => null);
+  const docs = data?.docs || [];
+  const seen = new Set();
+  const out = [];
+  for (const d of docs) {
+    const title = (d.title || '').trim();
+    const author = (d.author_name || [])[0] || 'Unknown';
+    if (!title) continue;
+    const key = `${title}|${author}`.toLowerCase().replace(/[^a-z0-9|]/g, '');
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({
+      source: 'openlibrary',
+      gbid: d.key,                                   // e.g. /works/OL12345W
+      title, plainTitle: title,
+      authorName: author, authors: d.author_name || [],
+      description: null,                             // filled at ingest via enrich()
+      categories: (d.subject || []).slice(0, 6),
+      cover: d.cover_i ? `https://covers.openlibrary.org/b/id/${d.cover_i}-M.jpg` : null,
+      year: d.first_publish_year || null,
+      rating: d.ratings_average ? Math.round(d.ratings_average * 10) / 10 : null,
+      ratingsCount: d.ratings_count || 0,
+      language: (d.language || ['eng'])[0],
+      isbn: (d.isbn || [])[0] || null,
+    });
+    if (out.length >= limit) break;
+  }
+  return out;
+}

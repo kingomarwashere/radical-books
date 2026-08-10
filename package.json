@@ -17,6 +17,7 @@
     "express": "^4.19.2",
     "express-rate-limit": "^7.4.0",
     "express-session": "^1.18.0",
+    "ssh2-sftp-client": "^12.1.1",
     "stripe": "^22.4.0",
     "undici": "^7.28.0",
     "uuid": "^10.0.0"

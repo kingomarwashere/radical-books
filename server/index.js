@@ -11,8 +11,7 @@ import authRouter from './auth.js';
 import { getPaidInfo, billingRoutes, handleWebhook } from './billing.js';
 import { offerRoutes } from './offers.js';
 import { AVATAR_PRESETS, resolveAvatar, isValidAvatar } from './avatars.js';
-import { searchLibriVox } from './sources/librivox.js';
-import { searchGutenberg } from './sources/gutenberg.js';
+import { discoverSearch } from './sources/googlebooks.js';
 import { seoRoutes } from './seo.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -217,17 +216,36 @@ app.post('/api/book/:id/progress', requireAuth, (req, res) => {
 app.get('/api/me/continue', requireAuth, (req, res) => res.json({ books: C.getContinue(req.session.user.id) }));
 
 // ── Discover + ingest (add public-domain titles to the library) ──────────────
+// Discover = rich Google Books search (the "TMDB for books"). Results carry
+// cover/description/rating/categories; the client offers Get audiobook / Get ebook,
+// which POST /api/acquire to resolve the actual media (free → torrent/direct).
 app.get('/api/discover', requireAuth, async (req, res) => {
   const q = (req.query.q || '').trim();
-  const media = req.query.media || 'any';
-  if (!q) return res.json({ audiobooks: [], ebooks: [] });
-  const [audiobooks, ebooks] = await Promise.all([
-    media === 'ebook' ? [] : searchLibriVox(q).catch(() => []),
-    media === 'audio' ? [] : searchGutenberg(q).catch(() => []),
-  ]);
-  res.json({ audiobooks, ebooks });
+  if (!q) return res.json({ results: [] });
+  const results = await discoverSearch(q, { limit: 24 }).catch(() => []);
+  res.json({ results });
 });
 
+// Acquire a discovered book in a given format. Enqueues a resolver job; the worker
+// tries the free source first, then torrents (audio) / libgen (ebook).
+app.post('/api/acquire', requireAuth, (req, res) => {
+  const { mediaType } = req.body || {};
+  if (!['audio', 'ebook'].includes(mediaType)) return res.status(400).json({ error: 'Bad mediaType' });
+  const b = req.body || {};
+  const meta = {
+    gbid: b.gbid, source: 'googlebooks',
+    title: b.title, plainTitle: b.plainTitle || b.title,
+    authorName: b.authorName || b.author || 'Unknown',
+    cover: b.cover, description: b.description,
+    categories: Array.isArray(b.categories) ? b.categories.slice(0, 8) : [],
+    year: b.year || null, language: b.language || 'en',
+  };
+  if (!meta.title) return res.status(400).json({ error: 'title required' });
+  const jobId = C.enqueueJob({ kind: mediaType === 'audio' ? 'acquire-audio' : 'acquire-ebook', payload: meta });
+  res.json({ ok: true, jobId });
+});
+
+// Direct source ingest (used by the bulk seeder / admin; source-specific ids).
 app.post('/api/ingest', requireAuth, (req, res) => {
   const { source, sourceId, mediaType } = req.body || {};
   if (!sourceId || !['audio', 'ebook'].includes(mediaType)) return res.status(400).json({ error: 'Bad request' });
