@@ -329,9 +329,22 @@ export function listBooks({ mediaType = 'any', subject = null, q = null, limit =
     : sort === 'popular' ? 'featured DESC, popularity DESC, added_at DESC'
     : 'added_at DESC';
   const rows = db.prepare(
-    `SELECT * FROM books WHERE ${where.join(' AND ')} ORDER BY ${order} LIMIT ? OFFSET ?`
+    `SELECT id, title, slug, author_name, cover_url, year, has_audio, has_ebook, audio_runtime, popularity, featured
+       FROM books WHERE ${where.join(' AND ')} ORDER BY ${order} LIMIT ? OFFSET ?`
   ).all(...args, limit, offset);
-  return rows.map(toBookClient);
+  return rows.map(toCard);
+}
+
+// Lightweight card (list/grid/home). Omits description + subjects — those are only
+// needed on the detail page, and shipping them in every card bloated payloads.
+export function toCard(b) {
+  if (!b) return null;
+  return {
+    id: b.id, title: b.title, slug: b.slug, author: b.author_name,
+    cover: b.cover_url, year: b.year,
+    hasAudio: !!b.has_audio, hasEbook: !!b.has_ebook,
+    audioRuntime: b.audio_runtime, featured: !!b.featured,
+  };
 }
 
 export function countBooks({ mediaType = 'any' } = {}) {
@@ -549,9 +562,11 @@ export const getProgress = (userId, bookId, mediaType) =>
   db.prepare(`SELECT * FROM reading_progress WHERE user_id = ? AND book_id = ? AND media_type = ?`).get(userId, bookId, mediaType);
 
 export function getContinue(userId, limit = 12) {
-  const rows = db.prepare(`SELECT rp.*, b.* FROM reading_progress rp JOIN books b ON b.id = rp.book_id
+  const rows = db.prepare(`SELECT rp.media_type, rp.percent, rp.chapter_idx, rp.position_sec, rp.locator,
+      b.id, b.title, b.slug, b.author_name, b.cover_url, b.year, b.has_audio, b.has_ebook, b.audio_runtime, b.featured
+    FROM reading_progress rp JOIN books b ON b.id = rp.book_id
     WHERE rp.user_id = ? AND rp.finished = 0 ORDER BY rp.updated_at DESC LIMIT ?`).all(userId, limit);
-  return rows.map(r => ({ ...toBookClient(r), mediaType: r.media_type, percent: r.percent, chapterIdx: r.chapter_idx, positionSec: r.position_sec, locator: r.locator }));
+  return rows.map(r => ({ ...toCard(r), mediaType: r.media_type, percent: r.percent, chapterIdx: r.chapter_idx, positionSec: r.position_sec, locator: r.locator }));
 }
 
 // ── Feedback ─────────────────────────────────────────────────────────────────

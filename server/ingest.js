@@ -124,14 +124,16 @@ function chapterTitleFromFile(name, i) {
   return name.replace(/\.[^.]+$/, '').replace(/^\d+[\s._-]*/, '').replace(/[_.]+/g, ' ').trim() || `Chapter ${i + 1}`;
 }
 
-// Attach audiobook chapters from a list of direct URLs (Internet Archive), mirroring
-// each to R2 (or hotlinking when MIRROR is off). Progress spans 20→98%.
-async function attachAudioFromUrls(bookId, chapters, onProgress) {
+// Attach audiobook chapters from a list of direct URLs (Internet Archive). By
+// default these HOTLINK the source — mirroring multi-hundred-MB audiobooks to R2
+// hammers the VM and adds storage for little benefit (IA streams reliably). Set
+// mirror=true to copy into R2. Progress spans 20→98%.
+async function attachAudioFromUrls(bookId, chapters, onProgress, mirror = false) {
   clearChapters(bookId);
   for (let i = 0; i < chapters.length; i++) {
     const ch = chapters[i];
     let url = ch.url, r2Key = null, size = null;
-    if (MIRROR) {
+    if (mirror) {
       const ext = extOf(ch.url) || '.mp3';
       const key = `${KEY_PREFIX}/audio/${bookId}/${String(i).padStart(4, '0')}${ext}`;
       const r = await uploadUrlToR2(ch.url, key, ext);

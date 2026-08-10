@@ -4,14 +4,17 @@
 // deploys go live instantly.
 const ORIGIN = 'http://books-origin.theradicalparty.com';
 const ORIGIN_HOST = 'books-origin.theradicalparty.com';
-const LONG_CACHE_RE = /\.(png|jpe?g|gif|svg|ico|webp|avif|woff2?|ttf|otf)$/i;
+const LONG_CACHE_RE = /\.(png|jpe?g|gif|svg|ico|webp|avif|woff2?|ttf|otf)$/i; // immutable-ish → 1 day
+const MED_CACHE_RE  = /\.(js|css)$/i;                                          // versioned/short-lived → 5 min
 
 export default {
   async fetch(request) {
     const url = new URL(request.url);
     const longCache = LONG_CACHE_RE.test(url.pathname);
+    const medCache  = MED_CACHE_RE.test(url.pathname);
+    const cacheable = longCache || medCache;
     const sep = url.search ? '&' : '?';
-    const target = ORIGIN + url.pathname + url.search + (longCache ? '' : `${sep}_cb=${Date.now()}`);
+    const target = ORIGIN + url.pathname + url.search + (cacheable ? '' : `${sep}_cb=${Date.now()}`);
 
     const fwd = new Headers(request.headers);
     fwd.set('host', ORIGIN_HOST);
@@ -25,12 +28,15 @@ export default {
       headers: fwd,
       body: ['GET', 'HEAD'].includes(request.method) ? undefined : request.body,
       redirect: 'manual',
-      cf: longCache ? { cacheEverything: true, cacheTtl: 86400 } : { cacheEverything: false, cacheTtl: 0 },
+      cf: cacheable ? { cacheEverything: true, cacheTtl: longCache ? 86400 : 300 } : { cacheEverything: false, cacheTtl: 0 },
     });
 
     const h = new Headers(resp.headers);
     if (longCache) {
       h.set('Cache-Control', 'public, max-age=86400');
+    } else if (medCache) {
+      h.set('Cache-Control', 'public, max-age=300');            // JS/CSS: fast repeat loads, deploys live in ≤5 min
+      h.delete('Cloudflare-CDN-Cache-Control');
     } else {
       h.set('Cache-Control', 'no-store');
       h.set('Cloudflare-CDN-Cache-Control', 'no-store');
