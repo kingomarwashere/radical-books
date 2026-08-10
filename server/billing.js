@@ -13,7 +13,16 @@ function stripe() {
   return new Stripe(process.env.STRIPE_SECRET_KEY);
 }
 
+// Billing is only enforced once Stripe is configured. Until then the whole app is
+// open (free preview) so early users aren't locked out when their trial lapses.
+// Set BILLING_ENABLED=1 (with the Stripe keys) to turn the paywall on.
+export function billingEnabled() {
+  if (process.env.BILLING_ENABLED === '0') return false;
+  return process.env.BILLING_ENABLED === '1' || !!process.env.STRIPE_SECRET_KEY;
+}
+
 export function getPaidInfo(userOrId) {
+  if (!billingEnabled()) return { paid: true, inTrial: false, trialEndsAt: null, accessType: 'preview', accessExpiresAt: null };
   const u = typeof userOrId === 'object' ? userOrId : getUserById(userOrId);
   if (!u) return { paid: false, inTrial: false, trialEndsAt: null, accessType: null, accessExpiresAt: null };
   const now = Date.now();
