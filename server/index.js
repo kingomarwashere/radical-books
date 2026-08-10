@@ -109,18 +109,25 @@ app.get('/api/search', (req, res) => {
 });
 
 // Cached "trending now" — Open Library trending intersected with books we have.
+// NEVER blocks the request: serves the current cache immediately and refreshes in
+// the background (a cold OL fetch was adding ~3s to the first /api/home load).
 let _trending = { at: 0, books: [] };
-async function trendingBooks() {
-  if (Date.now() - _trending.at < 60 * 60 * 1000) return _trending.books;
-  const list = await openLibraryTrending('weekly').catch(() => []);
-  const seen = new Set(), have = [];
-  for (const t of list) {
-    const row = C.findBookByTitleAuthor(t.title, t.author);
-    if (row && !seen.has(row.id)) { seen.add(row.id); have.push(C.toBookClient(row)); }
-    if (have.length >= 18) break;
+let _trendingRefreshing = false;
+function trendingBooks() {
+  const fresh = Date.now() - _trending.at < 60 * 60 * 1000;
+  if (!fresh && !_trendingRefreshing) {
+    _trendingRefreshing = true;
+    openLibraryTrending('weekly').then(list => {
+      const seen = new Set(), have = [];
+      for (const t of list) {
+        const row = C.findBookByTitleAuthor(t.title, t.author);
+        if (row && !seen.has(row.id)) { seen.add(row.id); have.push(C.toCard(row)); }
+        if (have.length >= 18) break;
+      }
+      _trending = { at: Date.now(), books: have };
+    }).catch(() => { _trending.at = Date.now(); }).finally(() => { _trendingRefreshing = false; });
   }
-  _trending = { at: Date.now(), books: have };
-  return have;
+  return _trending.books;
 }
 
 const cleanGenre = (s) => s.replace(/^Category:\s*/i, '').trim();
@@ -130,7 +137,7 @@ app.get('/api/home', async (req, res) => {
   const sections = [];
   // Lead with popularity so recognizable books surface first (not obscure archive rows).
   sections.push({ title: 'Popular right now', books: C.listBooks({ sort: 'popular', limit: 18 }) });
-  const trending = await trendingBooks().catch(() => []);
+  const trending = trendingBooks();
   if (trending.length >= 4) sections.push({ title: 'Trending this week', books: trending });
   sections.push({ title: 'Popular audiobooks', books: C.listBooks({ mediaType: 'audio', sort: 'popular', limit: 18 }) });
   sections.push({ title: 'Popular ebooks', books: C.listBooks({ mediaType: 'ebook', sort: 'popular', limit: 18 }) });
