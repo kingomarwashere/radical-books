@@ -5,8 +5,9 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Reader · Radical Books</title>
 <link rel="stylesheet" href="/style.css">
-<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/epubjs@0.3.93/dist/epub.min.js"></script>
+<!-- Self-hosted so ad-blockers / Brave shields can't block the reader (jsdelivr was blocked). -->
+<script src="/vendor/jszip.min.js"></script>
+<script src="/vendor/epub.min.js"></script>
 <style>
   body{overflow:hidden}
   .rtop{position:fixed;top:0;left:0;right:0;height:calc(52px + var(--safe-top));padding-top:var(--safe-top);
@@ -57,10 +58,14 @@ async function boot() {
     if (test.status === 402) return location.href = '/upgrade';
     if (test.status === 401) return location.href = `/?auth=login`;
   } catch {}
+  if (typeof ePub === 'undefined') return fail('Reader failed to load. Please refresh.');
   book = ePub(`/api/book/${bookId}/ebook/file?format=epub`);
   rendition = book.renderTo('viewer', { width: '100%', height: '100%', flow: 'paginated', spread: 'auto' });
   applyTheme();
+  // Never hang forever — if the book can't be parsed, surface an error.
+  const guard = setTimeout(() => fail('This book couldn’t be opened. It may still be processing — try again shortly.'), 25000);
   await rendition.display(saved?.locator || undefined);
+  clearTimeout(guard);
   document.getElementById('load').style.display = 'none';
   book.ready.then(() => book.locations.generate(1600)).then(() => updatePct());
   rendition.on('relocated', (loc) => {
@@ -108,7 +113,18 @@ document.getElementById('rprog').onclick = (e) => {
   const cfi = book?.locations?.cfiFromPercentage((e.clientX - r.left) / r.width);
   if (cfi) rendition.display(cfi);
 };
-boot();
+let failed = false;
+function fail(msg) {
+  if (failed) return; failed = true;
+  const l = document.getElementById('load');
+  l.style.display = 'flex';
+  l.innerHTML = `<div style="max-width:340px;text-align:center;color:var(--paperink,#5b4636)">
+    <div style="font-size:15px;margin-bottom:16px">${msg}</div>
+    <button onclick="location.reload()" style="padding:10px 20px;border-radius:99px;background:var(--red);color:#fff;font-weight:700;margin-right:8px">Retry</button>
+    <button onclick="history.length>1?history.back():location.href='/'" style="padding:10px 20px;border-radius:99px;background:#0002;color:inherit">Back</button>
+  </div>`;
+}
+boot().catch(e => fail('This book couldn’t be opened (' + (e.message || 'error') + ').'));
 </script>
 </body>
 </html>
