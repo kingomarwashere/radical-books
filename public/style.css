@@ -1,5 +1,5 @@
 :root{
-  --red:#FF2D55; --bg:#0B0B09; --bg2:#141310; --bg3:#1d1b17; --line:#2a2822;
+  --red:#ff0099; --bg:#0B0B09; --bg2:#141310; --bg3:#1d1b17; --line:#2a2822;
   --ink:#F5F1E8; --dim:#a49e8f; --dim2:#6f6a5e; --gold:#E8B84B;
   --radius:14px; --nav-h:60px; --player-h:76px;
   --font:'Syne',system-ui,sans-serif; --mono:'IBM Plex Mono',ui-monospace,monospace;
@@ -56,7 +56,7 @@ main{padding:calc(var(--nav-h) + var(--safe-top) + 20px) 20px calc(var(--player-
 .badge.audio{color:var(--gold)} .badge.ebook{color:#7EC8E3}
 .cover .play{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;opacity:0;transition:.2s;background:rgba(0,0,0,.3)}
 .card:hover .cover .play{opacity:1}
-.cover .play span{width:46px;height:46px;border-radius:50%;background:var(--red);display:flex;align-items:center;justify-content:center;box-shadow:0 4px 16px rgba(255,45,85,.5)}
+.cover .play span{width:46px;height:46px;border-radius:50%;background:var(--red);display:flex;align-items:center;justify-content:center;box-shadow:0 4px 16px rgba(255,0,153,.5)}
 .card .title{font-weight:600;font-size:14px;margin-top:9px;line-height:1.25;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
 .card .author{font-family:var(--mono);font-size:11px;color:var(--dim);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .card .prog{height:3px;border-radius:2px;background:var(--bg3);margin-top:7px;overflow:hidden}
@@ -78,7 +78,7 @@ main{padding:calc(var(--nav-h) + var(--safe-top) + 20px) 20px calc(var(--player-
 .detail .desc{color:var(--dim);font-size:15px;line-height:1.6;max-width:640px;margin-bottom:22px}
 .detail .actions{display:flex;gap:12px;flex-wrap:wrap;align-items:center}
 .btn{padding:13px 26px;border-radius:99px;font-weight:700;font-size:15px;display:inline-flex;align-items:center;gap:9px}
-.btn.primary{background:var(--red);color:#fff;box-shadow:0 4px 18px rgba(255,45,85,.35)}
+.btn.primary{background:var(--red);color:#fff;box-shadow:0 4px 18px rgba(255,0,153,.35)}
 .btn.ghost{background:var(--bg3);border:1px solid var(--line)}
 .btn.icon{padding:13px;border-radius:50%}
 .btn:active{transform:scale(.97)}

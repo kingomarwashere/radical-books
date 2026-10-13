@@ -83,9 +83,9 @@ export async function uploadStreamToR2(readable, totalSize, key, ext, onProgress
 }
 
 // Fetch a remote URL and stream it straight into R2 (no local disk).
-export async function uploadUrlToR2(url, key, ext, onProgress) {
+export async function uploadUrlToR2(url, key, ext, onProgress, extraHeaders = {}) {
   const res = await fetch(url, {
-    headers: { 'User-Agent': 'RadicalBooks/1.0 (+https://books.theradicalparty.com)' },
+    headers: { 'User-Agent': 'RadicalBooks/1.0 (+https://books.theradicalparty.com)', ...extraHeaders },
     signal: AbortSignal.timeout(120000),
   });
   if (!res.ok || !res.body) throw new Error(`fetch ${url} → ${res.status}`);

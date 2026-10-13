@@ -12,6 +12,7 @@ const SFTP_HOST = process.env.SEEDBOX_SFTP_HOST || 'ftl31.seedit4.me';
 const SFTP_PORT = parseInt(process.env.SEEDBOX_SFTP_PORT || '2100');
 
 const AUDIO_EXTS = new Set(['.mp3', '.m4a', '.m4b', '.aac', '.ogg', '.opus', '.flac', '.wav']);
+const EBOOK_EXTS = new Set(['.epub', '.mobi', '.azw3', '.azw', '.pdf', '.cbz', '.cbr']);
 
 // ── Bencode info-hash extractor (for .torrent files) ──────────────────────────
 function _bencEnd(buf, pos) {
@@ -95,25 +96,32 @@ export async function waitForDownload(hash, onProgress, { timeoutMs = 45 * 60 * 
 }
 
 // ── SFTP ──────────────────────────────────────────────────────────────────────
-async function _collectAudio(sftp, dir) {
+async function _collect(sftp, dir, extSet) {
   const items = await sftp.list(dir);
   const results = [];
   for (const item of items) {
-    if (item.type === 'd') results.push(...await _collectAudio(sftp, `${dir}/${item.name}`));
+    if (item.type === 'd') results.push(...await _collect(sftp, `${dir}/${item.name}`, extSet));
     else if (item.type === '-') {
       const ext = item.name.slice(item.name.lastIndexOf('.')).toLowerCase();
-      if (AUDIO_EXTS.has(ext)) results.push({ name: item.name, size: item.size, path: `${dir}/${item.name}` });
+      if (extSet.has(ext)) results.push({ name: item.name, size: item.size, path: `${dir}/${item.name}` });
     }
   }
   return results;
 }
-export async function listAudioFiles(remotePath) {
+async function _listByExt(remotePath, extSet) {
   const sftp = new SftpClient();
   try {
     await sftp.connect({ host: SFTP_HOST, port: SFTP_PORT, username: QB_USER, password: QB_PASS });
-    const results = await _collectAudio(sftp, remotePath);
+    const results = await _collect(sftp, remotePath, extSet);
     return results.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
   } finally { await sftp.end().catch(() => {}); }
+}
+export function listAudioFiles(remotePath) { return _listByExt(remotePath, AUDIO_EXTS); }
+// Ebook files, best format first (epub > mobi/azw3 > pdf > comics).
+export async function listEbookFiles(remotePath) {
+  const rank = { '.epub': 0, '.mobi': 1, '.azw3': 1, '.azw': 1, '.pdf': 2, '.cbz': 3, '.cbr': 3 };
+  const files = await _listByExt(remotePath, EBOOK_EXTS);
+  return files.sort((a, b) => (rank[a.name.slice(a.name.lastIndexOf('.')).toLowerCase()] ?? 9) - (rank[b.name.slice(b.name.lastIndexOf('.')).toLowerCase()] ?? 9));
 }
 export async function streamFile(remotePath) {
   const sftp = new SftpClient();

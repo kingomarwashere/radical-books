@@ -13,10 +13,14 @@ import { getLibriVoxBook, searchLibriVox } from './sources/librivox.js';
 import { getGutenbergBook, searchGutenberg } from './sources/gutenberg.js';
 import { enrich, coverByTitle } from './sources/openlibrary.js';
 import { searchTorrentLeech } from './sources/torrentleech.js';
+import { searchMyAnonaMouse } from './sources/myanonamouse.js';
+import { searchBibliotik } from './sources/bibliotik.js';
 import { findAudiobookBay } from './sources/audiobookbay.js';
 import { findLibgenEbook } from './sources/libgen.js';
+import { findAnnasEbook } from './sources/annas.js';
+import { findZlibEbook } from './sources/zlibrary.js';
 import { searchArchiveAudio, searchArchiveEbook } from './sources/archive.js';
-import { addTorrent, addMagnet, waitForDownload, listAudioFiles, streamFile } from './seedbox.js';
+import { addTorrent, addMagnet, waitForDownload, listAudioFiles, listEbookFiles, streamFile } from './seedbox.js';
 import path from 'node:path';
 
 const SEEDBOX_SAVE_PATH = process.env.SEEDBOX_SAVE_PATH || '/home/seedit4me/torrents/qbittorrent';
@@ -180,7 +184,9 @@ export async function acquireAudiobook(meta, { onProgress } = {}) {
   // 3) Torrents → seedbox → R2
   if (!TORRENTS_ENABLED()) throw new Error('Not on LibriVox/Internet Archive and torrents are not configured');
   onProgress?.(18, 'searching torrents');
-  let tor = await searchTorrentLeech(title, author, 'audio').catch(() => null);
+  let tor = await searchMyAnonaMouse(title, author, 'audio').catch(() => null);
+  if (!tor) tor = await searchBibliotik(title, author, 'audio').catch(() => null);
+  if (!tor) tor = await searchTorrentLeech(title, author, 'audio').catch(() => null);
   if (!tor) tor = await findAudiobookBay(title, author).catch(() => null);
   if (!tor) throw new Error('No audiobook torrent found');
 
@@ -216,8 +222,19 @@ export async function acquireEbook(meta, { onProgress } = {}) {
   // 2) Internet Archive (modern ebooks — epub preferred, pdf fallback), then 3) libgen.
   onProgress?.(8, 'searching Internet Archive');
   let found = await searchArchiveEbook(title, author).catch(() => null);
+  if (!found) { onProgress?.(10, "searching Anna's Archive"); found = await findAnnasEbook(title, author).catch(() => null); }
   if (!found) { onProgress?.(12, 'searching libgen'); found = await findLibgenEbook(title, author).catch(() => null); }
-  if (!found) throw new Error('Not on Gutenberg / Internet Archive / libgen');
+  if (!found) { onProgress?.(14, 'searching Z-Library'); found = await findZlibEbook(title, author).catch(() => null); }
+
+  // 6) Torrent ebook sources (MAM / Bibliotik) → seedbox → R2. These return a
+  // .torrent buffer instead of a direct URL, so they take the seedbox path.
+  if (!found && TORRENTS_ENABLED()) {
+    onProgress?.(16, 'searching MyAnonaMouse / Bibliotik');
+    let tor = await searchMyAnonaMouse(title, author, 'ebook').catch(() => null);
+    if (!tor) tor = await searchBibliotik(title, author, 'ebook').catch(() => null);
+    if (tor) return acquireEbookViaTorrent(meta, tor, { onProgress });
+  }
+  if (!found) throw new Error('Not on Gutenberg / Internet Archive / Anna’s / libgen / Z-Library / MAM / Bibliotik');
 
   const book = bookFromMeta(meta);
   await enrichBook(book, { title, authorName: author, coverUrl: meta.cover, description: meta.description, subjects: meta.categories });
@@ -226,10 +243,39 @@ export async function acquireEbook(meta, { onProgress } = {}) {
   if (MIRROR) {
     const key = `${KEY_PREFIX}/ebook/${book.id}.${fmt}`;
     onProgress?.(40, `downloading ${fmt}`);
-    const r = await uploadUrlToR2(found.url, key, `.${fmt}`);
+    const r = await uploadUrlToR2(found.url, key, `.${fmt}`, undefined, found.headers || {});
     r2Key = key; url = getStreamUrl(key); size = r.size;
   }
   addEdition({ bookId: book.id, format: fmt, r2Key, url, size, source: found.source || 'archive' });
+  setBookFlags(book.id, { hasEbook: true });
+  onProgress?.(100, 'done');
+  return getBook(book.id);
+}
+
+// Ebook via torrent (MAM / Bibliotik): download to the seedbox, pick the best
+// ebook file, and mirror it into R2. tor = { source, title, torrentBuf, magnet }.
+async function acquireEbookViaTorrent(meta, tor, { onProgress } = {}) {
+  const title = meta.plainTitle || meta.title, author = meta.authorName;
+  const book = bookFromMeta(meta);
+  await enrichBook(book, { title, authorName: author, coverUrl: meta.cover, description: meta.description, subjects: meta.categories });
+  const savePath = `${SEEDBOX_SAVE_PATH}/${book.id}`;
+  onProgress?.(20, `downloading: ${tor.title}`);
+  const hash = tor.torrentBuf ? await addTorrent(tor.torrentBuf, savePath) : await addMagnet(tor.magnet, savePath);
+  const info = await waitForDownload(hash, (p, st) => onProgress?.(20 + Math.floor(p * 0.6), `torrent ${p}% (${st})`));
+  const remote = info?.content_path || info?.save_path || savePath;
+  const files = await listEbookFiles(remote);
+  if (!files.length) throw new Error('No ebook files in torrent');
+  const file = files[0]; // best format first (epub > mobi/azw3 > pdf)
+  const fmt = (path.extname(file.name).slice(1) || 'epub').toLowerCase();
+  let url = null, r2Key = null, size = file.size;
+  if (MIRROR) {
+    const key = `${KEY_PREFIX}/ebook/${book.id}.${fmt}`;
+    onProgress?.(85, `uploading ${fmt}`);
+    const readable = await streamFile(file.path);
+    await uploadStreamToR2(readable, file.size, key, path.extname(file.name) || `.${fmt}`);
+    r2Key = key; url = getStreamUrl(key);
+  }
+  addEdition({ bookId: book.id, format: fmt === 'azw3' ? 'epub' : fmt, r2Key, url, size, source: tor.source });
   setBookFlags(book.id, { hasEbook: true });
   onProgress?.(100, 'done');
   return getBook(book.id);
